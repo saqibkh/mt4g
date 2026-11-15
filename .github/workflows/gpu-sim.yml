@@ -1,0 +1,79 @@
+name: GPU Simulator
+
+# The hosted runners have no GPU, so this builds mt4g for gfx942 with hipcc as
+# usual and runs a small part of it on a simulated AMD Instinct MI300X
+# (https://github.com/pantheongpu/pantheonsim). The simulator has no timing
+# model, so the latency and bandwidth values it produces are meaningless; the
+# job only checks that the benchmarks launch on the device, finish, exit 0 and
+# write a well-formed result.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ develop, master ]
+    paths:
+      - "src/**"
+      - "CMakeLists.txt"
+      - ".github/workflows/gpu-sim.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: mt4g (ROCm 7.1 and simulated MI300X)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+
+      - name: Set up the simulated GPU and ROCm
+        uses: pantheongpu/setup-pantheonsim@656f502ef4782d94d34d8ddd368e333960609639 # v0.1.8
+        with:
+          gpu: amd/mi300x
+          cuda-toolkit: none
+          rocm: "7.1"
+
+      # The distro cxxopts is older than the 3.2.0 that CMakeLists.txt asks for.
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config libdrm-dev \
+            nlohmann-json3-dev rocm-smi-lib hsa-rocr comgr hip-runtime-amd
+          ls -l /opt/rocm/lib | grep -E 'hsa|rocm_smi' || true
+          git clone --depth 1 --branch v3.2.0 https://github.com/jarro2783/cxxopts.git "$RUNNER_TEMP/cxxopts"
+          cmake -S "$RUNNER_TEMP/cxxopts" -B "$RUNNER_TEMP/cxxopts/build" \
+            -DCXXOPTS_BUILD_EXAMPLES=OFF -DCXXOPTS_BUILD_TESTS=OFF
+          sudo cmake --install "$RUNNER_TEMP/cxxopts/build"
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja -DGPU_TARGET_ARCH=gfx942 \
+            -DCMAKE_PREFIX_PATH=/opt/rocm
+
+      - name: Build
+        run: cmake --build build -j3
+
+      - name: Run mt4g on the simulated GPU
+        run: |
+          set -o pipefail
+          mkdir -p out
+          vgpu run ./build/mt4g --memory -t -f smoke -l out 2>&1 | tee run.log
+
+      # A run without a usable device or with a CPU/stub fallback must not pass.
+      - name: Check the output
+        run: |
+          grep -F '[Main Memory] Benchmarks finished' run.log
+          python3 - <<'PY'
+          import json
+          r = json.load(open("out/smoke.json"))
+          print(json.dumps(r, indent=1)[:3000])
+          assert r.get("memory", {}).get("main", {}).get("latency"), "no main memory latency in result"
+          PY
