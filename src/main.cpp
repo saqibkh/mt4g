@@ -320,7 +320,7 @@ int main(int argc, char* argv[]) {
 
         if (l1Size.confidence > VALIDITY_THRESHOLD) {
             
-            if (opts.runOptimalSearch)
+            if (true)
             {
                 std::cout << "[L1] Read Bandwidth per CU / MultiProcessor with optimal search" << std::endl;
                 CacheBandwidthResult l1ReadBandwidth;
@@ -352,21 +352,7 @@ int main(int argc, char* argv[]) {
                     util::writeBandwidthGridToCSV(l1WriteBandwidth, (graphDir / util::bandwidthGridFileName(fancyFileName, l1Label, "Write")).string());
                 }
             }
-            else
-            {
-                std::cout << "[L1] Read Bandwidth per CU / MultiProcessor" << std::endl;
-                result["memory"]["l1"]["readBandwidthPerCU"] = {
-                    {"value", timed("l1ReadBandwidth", [&] { return benchmark::measureL1ReadBandwidth(l1Size.size / 2); })},
-                    {"unit", "GiB/s"}
-                };
-
-                std::cout << "[L1] Write Bandwidth per CU / MultiProcessor" << std::endl;
-                result["memory"]["l1"]["writeBandwidthPerCU"] = {
-                    {"value", timed("l1WriteBandwidth", [&] { return benchmark::measureL1WriteBandwidth(l1Size.size / 2); })},
-                    {"unit", "GiB/s"}
-                };
-            }
-        } else {
+                } else {
             std::cout << "Could not measure valid L1 Size, skipping L1 Bandwidth benchmarks." << std::endl;
         }
 
